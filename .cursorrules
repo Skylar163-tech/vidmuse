@@ -1,0 +1,46 @@
+# VidMuse — Cursor Rules
+
+VidMuse 是学习向的 AI 视频下载与总结助手：Web 粘贴链接，经 yt-dlp 解析下载；后续做真实 AI 总结/字幕。
+仅供学习，请尊重版权。技术栈：React+Vite+Tailwind 前端，FastAPI 薄封装 yt-dlp，无数据库。
+
+## 技术栈
+
+- 前端：React、Vite、TypeScript、Tailwind CSS、react-router-dom
+- 后端：FastAPI、Pydantic、uvicorn、yt-dlp（CLI 子进程）
+- 包管理：前端 npm；后端 `apps/api/.venv` + `requirements.txt`
+
+## 目录约定
+
+- `apps/web/` — SPA；页面放 `src/pages/`，布局放 `src/components/`，API 客户端放 `src/lib/`
+- `apps/api/app/` — `main.py` 路由，`models.py` 模型，`ytdlp_service.py` 下载引擎封装
+- `apps/api/bin/` — 放置官方 yt-dlp 二进制（勿提交 exe）
+- `apps/api/temp/` — 临时下载目录（勿提交内容）
+- 根目录文档：`README.md`、`PROJECT_STATUS.md`、`ARCHITECTURE.md`
+
+## 代码规范
+
+- 中文 UI 文案；注释与文档可用中文
+- TypeScript 严格类型；Python 3.8+ 兼容（可用 `from __future__ import annotations`）
+- 不引入无必要的全局状态库；页面状态优先本地 hooks
+- 改动保持最小范围，不顺手大重构
+
+## 开发约定
+
+- **不要修改 yt-dlp 源码**；只通过 CLI / 子进程封装
+- **P2 真实 AI：禁止继续用假数据糊弄验收**；现有 `/api/ai/*` mock 仅占位，实现真实能力时替换，不要再扩 mock
+- UI 保持 Raycast 深色极简：背景 `#0A0A0F`、表面 `#111118`、强调 `#FF3B30` / hover `#FF5C52`、主文字 `#FFFFFF`、次要 `#A1A1AA`
+- 品牌名：**VidMuse**（勿写回旧名 Velo）
+- 无数据库除非产品明确要求升级
+
+## 当前开发阶段
+
+- **P0 完成**：解析 / 下载 / 封面代理 / Pro·AI 门面
+- **P2 待做**：真实视频总结、字幕翻译；替换 mock
+
+## 常见坑
+
+- B 站分享链接常带 `spm_id_from`、`trackId` 等参数，易导致解析异常 → 精简为纯 `https://www.bilibili.com/video/BVxxxx` 再解析
+- 封面勿在前端直链平台 CDN → 走 `GET /api/thumbnail?url=`
+- yt-dlp 过旧会导致部分站点失败 → 优先更新 `apps/api/bin/yt-dlp.exe`
+- 音视频分离格式合并需要本机 ffmpeg 在 PATH（可选）
+- 本地需同时起后端 `:8000` 与前端 `:5173`；前端依赖 Vite 代理 `/api`
