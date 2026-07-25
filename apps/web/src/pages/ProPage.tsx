@@ -1,10 +1,15 @@
 import { Link } from 'react-router-dom'
 
-const freeFeatures = ['单链接解析下载', '常见清晰度选择', '手机浏览器可用']
+const freeFeatures = [
+  '单链接解析下载',
+  '每日 3 次 AI 学习笔记 / 翻译体验',
+  '常见清晰度选择',
+  '手机浏览器可用',
+]
 const proFeatures = [
+  'AI 额度更高 / 不限次（即将开放）',
   '批量队列下载',
-  'AI 视频总结',
-  '字幕翻译导出',
+  '字幕翻译导出加强',
   '更高并发与优先处理',
   '后续更多能力',
 ]
@@ -14,8 +19,10 @@ export function ProPage() {
     <div className="mx-auto max-w-3xl">
       <div className="text-center">
         <p className="text-sm font-medium tracking-[0.2em] text-accent">VIDMUSE PRO</p>
-        <h1 className="mt-3 text-4xl font-semibold tracking-tight">更快，更省事</h1>
-        <p className="mt-3 text-muted">为经常存视频的人准备。支付能力即将接入。</p>
+        <h1 className="mt-3 text-4xl font-semibold tracking-tight">先体验，再升级</h1>
+        <p className="mt-3 text-muted">
+          免费每天可用 3 次 AI 笔记；用得多再开 Pro。支付能力即将接入。
+        </p>
       </div>
 
       <div className="mt-12 grid gap-5 md:grid-cols-2">
@@ -36,7 +43,7 @@ export function ProPage() {
             to="/"
             className="mt-8 flex h-11 items-center justify-center rounded-xl border border-line text-sm font-medium transition hover:border-muted"
           >
-            继续免费使用
+            继续免费体验
           </Link>
         </div>
 

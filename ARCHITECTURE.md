@@ -1,6 +1,7 @@
 # ARCHITECTURE — VidMuse
 
-本文档描述当前仓库的真实结构与实现，不包含未落地的设计。
+本文档描述当前仓库的真实结构与实现，不包含未落地的设计。  
+**产品状态与卡点以 [PROJECT_STATUS.md](PROJECT_STATUS.md) 为准。**
 
 ## 目录结构
 
@@ -10,38 +11,40 @@ free-video-downloader/
 │   ├── api/                          # FastAPI 后端
 │   │   ├── app/
 │   │   │   ├── __init__.py
-│   │   │   ├── main.py               # 路由、CORS、封面代理、AI mock
+│   │   │   ├── main.py               # 路由、CORS、封面代理、AI、配额
 │   │   │   ├── models.py             # Pydantic 请求/响应模型
-│   │   │   └── ytdlp_service.py      # yt-dlp 子进程封装、任务队列
-│   │   ├── bin/                      # yt-dlp 官方二进制（内容 gitignore）
-│   │   │   ├── .gitkeep
-│   │   │   └── .gitignore
+│   │   │   ├── ytdlp_service.py      # yt-dlp 子进程封装、任务队列、可选 cookies
+│   │   │   ├── url_utils.py          # URL 清洗（B 站追踪参数）
+│   │   │   ├── subtitle_service.py   # 字幕拉取与解析（无轨不兜底）
+│   │   │   ├── deepseek_client.py    # DeepSeek API 客户端
+│   │   │   ├── ai_service.py         # 总结 / 翻译编排
+│   │   │   └── quota.py              # 免费 AI 日限额（内存 + Cookie）
+│   │   ├── bin/                      # yt-dlp / ffmpeg 二进制（内容 gitignore）
 │   │   ├── temp/                     # 下载临时文件（gitignore）
-│   │   │   └── .gitkeep
+│   │   ├── cookies.txt               # 可选 Netscape cookies（gitignore，勿提交）
+│   │   ├── .env.example
 │   │   ├── requirements.txt
-│   │   └── .venv/                    # 本地虚拟环境（gitignore）
+│   │   └── .venv/
 │   └── web/                          # React + Vite SPA
-│       ├── public/                   # 静态资源（favicon 等）
 │       ├── src/
-│       │   ├── App.tsx               # 路由表
-│       │   ├── main.tsx              # 入口
-│       │   ├── index.css             # Tailwind + 主题色
+│       │   ├── App.tsx
+│       │   ├── main.tsx
+│       │   ├── index.css
 │       │   ├── components/
-│       │   │   └── Shell.tsx         # 顶栏 / 页脚布局
+│       │   │   └── Shell.tsx         # 顶栏 / 页脚；笔记导航带 session
 │       │   ├── pages/
-│       │   │   ├── HomePage.tsx      # 下载主流程
-│       │   │   ├── ProPage.tsx       # Pro 门面
-│       │   │   └── AiPage.tsx        # AI 占位页
+│       │   │   ├── HomePage.tsx      # 解析、双 CTA、清空、下载
+│       │   │   ├── AiPage.tsx        # 学习笔记：本页解析、自动总结、独立翻译
+│       │   │   └── ProPage.tsx       # Pro 门面（支付占位）
 │       │   └── lib/
-│       │       └── api.ts            # fetch 封装与类型
-│       ├── index.html
-│       ├── vite.config.ts            # 开发代理 /api → :8000
-│       ├── package.json
-│       └── dist/                     # 构建产物（gitignore）
-├── README.md                         # 启动说明
-├── PROJECT_STATUS.md                 # 项目状态
-├── ARCHITECTURE.md                   # 本文件
-├── .cursorrules                      # Cursor 开发约定
+│       │       ├── api.ts            # fetch 封装与类型
+│       │       └── videoSession.ts   # sessionStorage 跨页上下文
+│       ├── vite.config.ts
+│       └── package.json
+├── README.md
+├── PROJECT_STATUS.md
+├── ARCHITECTURE.md
+├── .cursorrules
 └── .gitignore
 ```
 
@@ -55,7 +58,7 @@ free-video-downloader/
 |---|---|
 | `/` | `HomePage` |
 | `/pro` | `ProPage` |
-| `/ai` | `AiPage` |
+| `/ai` | `AiPage`（支持 `?url=&title=`；可本页换链） |
 
 外层统一包在 `Shell` 中。
 
@@ -63,14 +66,17 @@ free-video-downloader/
 
 | 模块 | 职责 |
 |---|---|
-| `Shell` | 品牌、导航、版权页脚 |
-| `HomePage` | 解析表单、结果卡、格式选择、下载轮询 |
-| `ProPage` / `AiPage` | 付费与 AI 占位 UI |
-| `lib/api.ts` | 调用后端 REST；`thumbnailUrl` / `fileUrl` 辅助 |
+| `Shell` | 品牌、导航、版权页脚；「学习笔记」优先带 session url |
+| `HomePage` | 解析、双 CTA（学习笔记 / 下载）、清晰度与进度、一键清空 |
+| `AiPage` | 本页「解析并开始」、自动总结、独立翻译、同页下载、日额度 |
+| `ProPage` | 免费 3 次/日 vs Pro 文案；支付占位 |
+| `lib/api.ts` | REST 客户端与类型（含 `credentials: 'include'`） |
+| `lib/videoSession.ts` | `sessionStorage`：url / title / formats / selectedFormatId |
 
 ### 状态管理
 
-无全局状态库。各页面用 React `useState` / `useEffect` 管理本地状态（如解析结果、`jobId`、进度）。下载进度通过定时调用 `GET /api/jobs/{id}` 轮询。
+无全局状态库。各页面用 React `useState` / `useEffect`。  
+**跨页上下文**靠 `sessionStorage`（`videoSession`），不是 Redux。下载进度通过 `GET /api/jobs/{id}` 轮询。
 
 ### 开发联调
 
@@ -84,26 +90,36 @@ free-video-downloader/
 
 | 方法 | 路径 | 功能 |
 |---|---|---|
-| `GET` | `/api/health` | yt-dlp / ffmpeg 健康检查 |
+| `GET` | `/api/health` | yt-dlp / ffmpeg / deepseek 健康检查 |
 | `POST` | `/api/parse` | 解析 URL 元信息与 formats |
 | `POST` | `/api/download` | 创建下载任务 |
 | `GET` | `/api/jobs/{job_id}` | 任务状态 |
 | `GET` | `/api/jobs/{job_id}/file` | 完成后取文件 |
 | `GET` | `/api/thumbnail` | 查询参数 `url`，代理封面 |
-| `POST` | `/api/ai/summary` | AI 总结 **mock** |
-| `POST` | `/api/ai/translate-subs` | 字幕翻译 **mock** |
+| `GET` | `/api/ai/quota` | 今日免费 AI 已用/剩余（设备 Cookie） |
+| `POST` | `/api/ai/summary` | 字幕 → DeepSeek 结构化总结（成功计 1 次日限额） |
+| `POST` | `/api/ai/translate-subs` | 字幕 → DeepSeek 翻译（成功计 1 次日限额） |
 
-CORS 允许：`http://localhost:5173`、`http://127.0.0.1:5173`。
+CORS 允许：`http://localhost:5173`、`http://127.0.0.1:5173`（`allow_credentials=True`）。
 
 ### yt-dlp 封装方式
 
 [`apps/api/app/ytdlp_service.py`](apps/api/app/ytdlp_service.py)：
 
 1. **二进制优先级**：`apps/api/bin/yt-dlp(.exe)` → venv Scripts → `PATH` → 回退 `python -m yt_dlp`
-2. **解析**：`yt-dlp --dump-json --no-playlist --no-warnings <url>`
-3. **下载**：后台 `threading.Thread` 执行 `yt-dlp -f <format> -o <temp/...>`；解析 stdout 中的进度百分比
-4. **任务**：进程内 `_jobs` 字典 + 锁；TTL 约 30 分钟清理；时长软限制 3 小时
+2. **可选 Cookie**：若存在 `YTDLP_COOKIES_FILE` 或 `apps/api/cookies.txt`，所有 `run_yt_dlp` 自动加 `--cookies`
+3. **解析**：`yt-dlp --dump-json --no-playlist --no-warnings <url>`
+4. **下载**：后台线程执行；TTL / 时长软限制见代码
 5. **不修改** yt-dlp 源码，仅 CLI 封装
+
+### 字幕与 AI
+
+[`subtitle_service.py`](apps/api/app/subtitle_service.py) + [`ai_service.py`](apps/api/app/ai_service.py)：
+
+- 拉轨：`--write-subs` / `--write-auto-subs`，语言含 `ai-zh` 等，失败再 `all`
+- **无真实字幕轨则失败**，不回退标题/简介编造笔记
+- 错误文案区分「无外挂轨」与「可能需登录 Cookie」
+- 配额：[`quota.py`](apps/api/app/quota.py) 按日 + 设备 Cookie；成功调用后 `consume`
 
 ### 主要请求 / 响应格式
 
@@ -168,8 +184,15 @@ CORS 允许：`http://localhost:5173`、`http://127.0.0.1:5173`。
   "ok": true,
   "yt_dlp": "2026.07.04",
   "ffmpeg": false,
+  "deepseek": true,
   "message": "未检测到 ffmpeg，..."
 }
+```
+
+**`GET /api/ai/quota`**
+
+```json
+{ "used": 1, "limit": 3, "remaining": 2 }
 ```
 
 **`GET /api/thumbnail?url=<encoded>`**  
@@ -180,10 +203,12 @@ CORS 允许：`http://localhost:5173`、`http://127.0.0.1:5173`。
 | 决策 | 原因 |
 |---|---|
 | React + Vite，不用 Next.js | 纯 SPA 工具页，无需 SSR / API Routes，更轻 |
-| FastAPI + 子进程调 yt-dlp | 与引擎同生态；站在巨人肩膀上，不自研各站解析 |
-| 无数据库 | MVP 轻量；任务短生命周期用内存即可 |
+| FastAPI + 子进程调 yt-dlp | 与引擎同生态；不自研各站解析 |
+| 无数据库 | MVP 轻量；任务与日限额用内存即可 |
 | 封面走 `/api/thumbnail` | 浏览器直链常被平台 CDN 防盗链拦截 |
-| AI 先 mock | 先打通产品门面；P2 再接真实模型 |
+| AI 用 DeepSeek + 平台字幕 | 真实笔记；无字幕暂不 ASR，禁止标题幻觉 |
+| sessionStorage 跨页 | 修旅途断点，不上全局状态库 |
+| 首页笔记主 CTA、下载次 CTA | 创作者向产品叙事，能力解耦 |
 | 中文 UI + Raycast 色板 | 目标用户与视觉约定 |
 
 ## 配置文件说明
@@ -193,8 +218,9 @@ CORS 允许：`http://localhost:5173`、`http://127.0.0.1:5173`。
 | `apps/web/vite.config.ts` | 端口 5173；`/api` 代理到 FastAPI |
 | `apps/web/src/index.css` | Tailwind v4 `@theme`：背景 `#0A0A0F`、表面 `#111118`、强调 `#FF3B30` 等 |
 | `apps/web/package.json` | 前端依赖与脚本 |
-| `apps/api/requirements.txt` | `fastapi`、`uvicorn`、`yt-dlp`、`pydantic`（运行时还用到 `requests`，随 yt-dlp 依赖安装） |
-| `.gitignore` | 忽略 `.venv`、`node_modules`、`dist`、`apps/api/temp/`、`.env` 等 |
+| `apps/api/requirements.txt` | `fastapi`、`uvicorn`、`yt-dlp`、`pydantic`、`openai`、`python-dotenv` |
+| `apps/api/.env.example` | `DEEPSEEK_API_KEY`、可选 `DEEPSEEK_MODEL` / `FREE_AI_DAILY_LIMIT` / `YTDLP_COOKIES_FILE` |
+| `.gitignore` | 忽略 `.venv`、`node_modules`、`dist`、`temp/`、`.env`、`cookies.txt` 等 |
 | `apps/api/bin/.gitignore` | 忽略二进制，保留目录占位 |
 
 ## 数据流（下载）
@@ -208,4 +234,16 @@ CORS 允许：`http://localhost:5173`、`http://127.0.0.1:5173`。
   → 后台 yt-dlp 写 temp/
   → 轮询 GET /api/jobs/{id}
   → GET /api/jobs/{id}/file 触发保存
+```
+
+## 数据流（学习笔记）
+
+```text
+HomePage「生成学习笔记」或 AiPage「解析并开始」
+  → sessionStorage 保存 url/formats
+  → （可选）自动 POST /api/ai/summary
+  → yt-dlp 拉字幕（可选 --cookies）→ 解析 VTT/SRT
+  → DeepSeek 生成 summary / bullets / chapters
+  → 前端展示；翻译可另调 POST /api/ai/translate-subs
+  → 同页可复用 formats 下载原片
 ```

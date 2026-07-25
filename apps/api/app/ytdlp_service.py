@@ -47,12 +47,33 @@ def yt_dlp_bin() -> str:
     return ""
 
 
+def cookies_file() -> Optional[str]:
+    """Optional Netscape cookies for sites that gate subtitles (e.g. Bilibili)."""
+    env = (os.environ.get("YTDLP_COOKIES_FILE") or "").strip()
+    candidates = []
+    if env:
+        candidates.append(Path(env))
+    candidates.append(ROOT / "cookies.txt")
+    for path in candidates:
+        try:
+            if path.is_file() and path.stat().st_size > 0:
+                return str(path.resolve())
+        except OSError:
+            continue
+    return None
+
+
 def run_yt_dlp(args: List[str], timeout: Optional[int] = 120) -> subprocess.CompletedProcess:
     bin_path = yt_dlp_bin()
+    cookie = cookies_file()
+    final_args = list(args)
+    if cookie and "--cookies" not in final_args:
+        # Insert before URL (last arg is typically the URL)
+        final_args = ["--cookies", cookie, *final_args]
     if bin_path:
-        cmd = [bin_path, *args]
+        cmd = [bin_path, *final_args]
     else:
-        cmd = [os.sys.executable, "-m", "yt_dlp", *args]
+        cmd = [os.sys.executable, "-m", "yt_dlp", *final_args]
     return subprocess.run(
         cmd,
         capture_output=True,
@@ -73,8 +94,32 @@ def get_yt_dlp_version() -> Optional[str]:
         return None
 
 
+def ffmpeg_bin() -> Optional[str]:
+    found = _which("ffmpeg")
+    if found:
+        return found
+    root = Path(__file__).resolve().parent.parent
+    local = root / "bin" / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    if local.exists():
+        return str(local)
+    home = Path.home()
+    candidates = [
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "ffmpeg" / "bin" / "ffmpeg.exe",
+        Path(r"C:\ffmpeg\bin\ffmpeg.exe"),
+        home / "AppData" / "Local" / "Microsoft" / "WinGet" / "Links" / "ffmpeg.exe",
+    ]
+    winget_root = home / "AppData" / "Local" / "Microsoft" / "WinGet" / "Packages"
+    if winget_root.exists():
+        candidates.extend(winget_root.glob("Gyan.FFmpeg*/*/bin/ffmpeg.exe"))
+        candidates.extend(winget_root.glob("Gyan.FFmpeg*/ffmpeg-*/bin/ffmpeg.exe"))
+    for c in candidates:
+        if c.exists():
+            return str(c)
+    return None
+
+
 def has_ffmpeg() -> bool:
-    return _which("ffmpeg") is not None
+    return ffmpeg_bin() is not None
 
 
 def _format_resolution(fmt: dict) -> Optional[str]:
@@ -90,6 +135,12 @@ def _format_resolution(fmt: dict) -> Optional[str]:
     if fmt.get("vcodec") in (None, "none") and fmt.get("acodec") not in (None, "none"):
         return "音频"
     return None
+
+
+def _is_muxed(fmt: dict) -> bool:
+    v = fmt.get("vcodec") not in (None, "none")
+    a = fmt.get("acodec") not in (None, "none")
+    return bool(v and a)
 
 
 def _is_useful_format(fmt: dict) -> bool:
@@ -117,6 +168,7 @@ def parse_url(url: str) -> ParseResponse:
     if duration and float(duration) > MAX_DURATION_SECONDS:
         raise RuntimeError("视频过长（超过 3 小时），请换更短的内容")
 
+    ffmpeg_ok = has_ffmpeg()
     formats: List[FormatInfo] = []
     seen = set()
     for fmt in info.get("formats") or []:
@@ -125,7 +177,18 @@ def parse_url(url: str) -> ParseResponse:
         fid = str(fmt.get("format_id") or "")
         if not fid or fid in seen:
             continue
+        # Without ffmpeg, video-only / audio-only cannot be merged — hide them from picker
+        # (download layer still auto-fixes if an old client sends video-only id)
+        if not ffmpeg_ok and not _is_muxed(fmt):
+            # Keep pure audio options labeled; skip video-only silent streams
+            if fmt.get("vcodec") not in (None, "none") and fmt.get("acodec") in (None, "none"):
+                continue
         seen.add(fid)
+        note = fmt.get("format_note")
+        if _is_muxed(fmt):
+            note = f"{note} · 含音频" if note else "含音频"
+        elif fmt.get("vcodec") not in (None, "none"):
+            note = f"{note} · 仅视频需ffmpeg" if note else "仅视频需ffmpeg"
         formats.append(
             FormatInfo(
                 format_id=fid,
@@ -138,12 +201,13 @@ def parse_url(url: str) -> ParseResponse:
                 filesize_approx=fmt.get("filesize_approx"),
                 tbr=fmt.get("tbr"),
                 note=fmt.get("format"),
-                format_note=fmt.get("format_note"),
+                format_note=note,
             )
         )
 
-    # Prefer higher quality first: has video, then height/tbr
+    # Prefer: muxed first, then higher resolution
     def sort_key(f: FormatInfo):
+        muxed = 1 if (f.vcodec and f.acodec) else 0
         has_video = 1 if f.vcodec else 0
         height = 0
         if f.resolution and f.resolution.endswith("p") and f.resolution[:-1].isdigit():
@@ -153,9 +217,20 @@ def parse_url(url: str) -> ParseResponse:
                 height = int(f.resolution.split("x")[-1])
             except ValueError:
                 height = 0
-        return (has_video, height, f.tbr or 0)
+        return (muxed, has_video, height, f.tbr or 0)
 
     formats.sort(key=sort_key, reverse=True)
+
+    # If no muxed listed and no ffmpeg, Bilibili-style dash cannot produce audio
+    if not ffmpeg_ok and not any(f.vcodec and f.acodec for f in formats):
+        formats = [
+            FormatInfo(
+                format_id="NEED_FFMPEG",
+                ext="mp4",
+                resolution="需安装 ffmpeg",
+                format_note="音视频分离，请把 ffmpeg.exe 放到 apps/api/bin/ 后重启",
+            )
+        ]
 
     # Cap list for UI
     formats = formats[:40]
@@ -173,6 +248,9 @@ def parse_url(url: str) -> ParseResponse:
 
 
 def create_job(url: str, format_id: str) -> str:
+    # Fail fast when merge is required but ffmpeg is missing
+    _resolve_format_selector(format_id)
+
     job_id = uuid.uuid4().hex
     job_dir = TEMP_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -205,6 +283,36 @@ def _parse_progress(line: str) -> Optional[float]:
         return None
 
 
+def _resolve_format_selector(format_id: str) -> str:
+    """Build yt-dlp -f selector so downloads keep audio when possible."""
+    fid = (format_id or "").strip()
+    if fid in ("NEED_FFMPEG", "bv*+ba/b", "bv+ba"):
+        if not has_ffmpeg():
+            raise RuntimeError(
+                "该视频音视频分离，下载有声文件需要 ffmpeg。"
+                "请将 ffmpeg.exe 放到 apps/api/bin/ 后重启后端（见 README）。"
+            )
+        return "bv*+ba/b"
+
+    if "+" in fid:
+        if not has_ffmpeg():
+            raise RuntimeError(
+                "合并音视频需要 ffmpeg，请将 ffmpeg.exe 放到 apps/api/bin/ 后重启后端。"
+            )
+        return fid
+
+    if has_ffmpeg():
+        # Bilibili/YouTube dash: merge chosen video with best audio
+        return f"{fid}+bestaudio/{fid}/best"
+
+    # No ffmpeg: cannot merge. Prefer already-muxed single file.
+    return (
+        f"best[format_id={fid}]/"
+        f"best[vcodec!=none][acodec!=none]/"
+        f"best"
+    )
+
+
 def _run_download(job_id: str, url: str, format_id: str) -> None:
     with _lock:
         job = _jobs.get(job_id)
@@ -214,10 +322,7 @@ def _run_download(job_id: str, url: str, format_id: str) -> None:
         job_dir = Path(job["dir"])
 
     out_tmpl = str(job_dir / "%(title).80B [%(id)s].%(ext)s")
-    fmt = format_id
-    # Only attempt merge when ffmpeg exists and format looks video-only (no '+')
-    if has_ffmpeg() and "+" not in format_id:
-        fmt = f"{format_id}+bestaudio/{format_id}/best"
+    fmt = _resolve_format_selector(format_id.strip())
 
     bin_path = yt_dlp_bin()
     if bin_path:
@@ -239,6 +344,10 @@ def _run_download(job_id: str, url: str, format_id: str) -> None:
     )
     if has_ffmpeg():
         cmd.extend(["--merge-output-format", "mp4"])
+        ff = ffmpeg_bin()
+        if ff:
+            # Help yt-dlp find ffmpeg even if not on PATH yet
+            cmd.extend(["--ffmpeg-location", str(Path(ff).parent)])
 
     try:
         proc = subprocess.Popen(

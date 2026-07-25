@@ -36,13 +36,23 @@ export type HealthResponse = {
   ok: boolean
   yt_dlp?: string | null
   ffmpeg: boolean
+  deepseek?: boolean
   message?: string | null
+}
+
+export type AiChapter = {
+  start: string
+  title: string
+  points: string[]
 }
 
 export type AiSummaryResponse = {
   title: string
   summary: string
   bullets: string[]
+  chapters: AiChapter[]
+  subtitle_lang?: string | null
+  truncated: boolean
   pro_required: boolean
 }
 
@@ -54,8 +64,15 @@ export type AiTranslateResponse = {
   pro_required: boolean
 }
 
+export type AiQuotaResponse = {
+  used: number
+  limit: number
+  remaining: number
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
     ...init,
   })
@@ -67,7 +84,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* ignore */
     }
-    throw new Error(detail)
+    const err = new Error(detail) as Error & { status?: number }
+    err.status = res.status
+    throw err
   }
   return res.json() as Promise<T>
 }
@@ -87,16 +106,17 @@ export const api = {
   job: (jobId: string) => request<JobStatus>(`/api/jobs/${jobId}`),
   fileUrl: (jobId: string) => `/api/jobs/${jobId}/file`,
   thumbnailUrl: (raw: string) => `/api/thumbnail?url=${encodeURIComponent(raw)}`,
-  summary: (payload: { url?: string; title?: string }) =>
+  summary: (payload: { url: string; title?: string }) =>
     request<AiSummaryResponse>('/api/ai/summary', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  translate: (payload: { url?: string; title?: string }) =>
+  translate: (payload: { url: string; title?: string; language_to?: string }) =>
     request<AiTranslateResponse>('/api/ai/translate-subs', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  aiQuota: () => request<AiQuotaResponse>('/api/ai/quota'),
 }
 
 export function formatDuration(seconds?: number | null): string {
@@ -119,4 +139,50 @@ export function formatBytes(bytes?: number | null): string {
     i += 1
   }
   return `${n.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
+
+export function summaryToMarkdown(data: AiSummaryResponse): string {
+  const lines: string[] = [`# ${data.title}`, '', data.summary, '']
+  if (data.bullets.length) {
+    lines.push('## 要点', ...data.bullets.map((b) => `- ${b}`), '')
+  }
+  if (data.chapters.length) {
+    lines.push('## 章节')
+    for (const ch of data.chapters) {
+      lines.push(`### [${ch.start}] ${ch.title}`)
+      for (const p of ch.points) lines.push(`- ${p}`)
+      lines.push('')
+    }
+  }
+  if (data.truncated) lines.push('> 字幕已截断，总结可能不完整', '')
+  return lines.join('\n').trim() + '\n'
+}
+
+export function translateToMarkdown(data: AiTranslateResponse): string {
+  const lines: string[] = [
+    `# ${data.title}`,
+    '',
+    `${data.language_from} → ${data.language_to}`,
+    '',
+  ]
+  for (const line of data.lines) {
+    lines.push(`**[${line.start} – ${line.end}]**`)
+    lines.push(line.original)
+    lines.push(line.translated)
+    lines.push('')
+  }
+  return lines.join('\n').trim() + '\n'
+}
+
+export function formatLabel(f: FormatInfo): string {
+  const hasAv = Boolean(f.vcodec && f.acodec)
+  const bits = [
+    f.resolution || (f.vcodec ? '视频' : '音频'),
+    f.ext?.toUpperCase(),
+    f.format_note,
+    f.fps ? `${Math.round(f.fps)}fps` : null,
+    formatBytes(f.filesize || f.filesize_approx),
+    hasAv ? '有声' : f.vcodec && !f.acodec ? '无声' : null,
+  ].filter(Boolean)
+  return bits.join(' · ')
 }

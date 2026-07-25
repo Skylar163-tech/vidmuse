@@ -1,10 +1,23 @@
-import type { ReactNode } from 'react'
-import { Link, NavLink } from 'react-router-dom'
+import type { MouseEvent, ReactNode } from 'react'
+import { Link, NavLink, useNavigate } from 'react-router-dom'
+import { loadSession, notesPathFromSession } from '../lib/videoSession'
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   `text-sm transition-colors ${isActive ? 'text-ink' : 'text-muted hover:text-ink'}`
 
 export function Shell({ children }: { children: ReactNode }) {
+  const navigate = useNavigate()
+
+  function goNotes(e: MouseEvent<HTMLAnchorElement>) {
+    e.preventDefault()
+    const session = loadSession()
+    if (session?.url) {
+      navigate(notesPathFromSession(session))
+    } else {
+      navigate('/ai')
+    }
+  }
+
   return (
     <div className="relative mx-auto flex min-h-dvh w-full max-w-5xl flex-col px-5 pb-10 pt-6 sm:px-8">
       <header className="mb-10 flex items-center justify-between gap-4">
@@ -16,10 +29,14 @@ export function Shell({ children }: { children: ReactNode }) {
         </Link>
         <nav className="flex items-center gap-5">
           <NavLink to="/" end className={linkClass}>
-            下载
+            首页
           </NavLink>
-          <NavLink to="/ai" className={linkClass}>
-            AI
+          <NavLink
+            to="/ai"
+            onClick={goNotes}
+            className={linkClass}
+          >
+            学习笔记
           </NavLink>
           <NavLink
             to="/pro"

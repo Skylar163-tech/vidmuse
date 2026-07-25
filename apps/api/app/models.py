@@ -53,15 +53,25 @@ class JobStatus(BaseModel):
 
 
 class AiRequest(BaseModel):
-    url: Optional[str] = None
+    url: str = Field(..., min_length=4)
     title: Optional[str] = None
+    language_to: Optional[str] = "zh"
+
+
+class AiChapter(BaseModel):
+    start: str
+    title: str
+    points: List[str] = []
 
 
 class AiSummaryResponse(BaseModel):
     title: str
     summary: str
     bullets: List[str]
-    pro_required: bool = True
+    chapters: List[AiChapter] = []
+    subtitle_lang: Optional[str] = None
+    truncated: bool = False
+    pro_required: bool = False
 
 
 class SubtitleLine(BaseModel):
@@ -76,11 +86,18 @@ class AiTranslateResponse(BaseModel):
     language_from: str
     language_to: str
     lines: List[SubtitleLine]
-    pro_required: bool = True
+    pro_required: bool = False
 
 
 class HealthResponse(BaseModel):
     ok: bool
     yt_dlp: Optional[str] = None
     ffmpeg: bool = False
+    deepseek: bool = False
     message: Optional[str] = None
+
+
+class AiQuotaResponse(BaseModel):
+    used: int
+    limit: int
+    remaining: int
