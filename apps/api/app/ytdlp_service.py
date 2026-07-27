@@ -188,7 +188,11 @@ def parse_url(url: str) -> ParseResponse:
         if _is_muxed(fmt):
             note = f"{note} · 含音频" if note else "含音频"
         elif fmt.get("vcodec") not in (None, "none"):
-            note = f"{note} · 仅视频需ffmpeg" if note else "仅视频需ffmpeg"
+            # With ffmpeg, download merges bestaudio — label as with-audio, not silent
+            if ffmpeg_ok:
+                note = f"{note} · 有声（自动合并）" if note else "有声（自动合并）"
+            else:
+                note = f"{note} · 仅视频需ffmpeg" if note else "仅视频需ffmpeg"
         formats.append(
             FormatInfo(
                 format_id=fid,

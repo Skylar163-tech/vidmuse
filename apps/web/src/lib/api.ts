@@ -175,14 +175,13 @@ export function translateToMarkdown(data: AiTranslateResponse): string {
 }
 
 export function formatLabel(f: FormatInfo): string {
-  const hasAv = Boolean(f.vcodec && f.acodec)
+  // Audio status comes from backend format_note (含音频 / 有声（自动合并） / …)
   const bits = [
     f.resolution || (f.vcodec ? '视频' : '音频'),
     f.ext?.toUpperCase(),
     f.format_note,
     f.fps ? `${Math.round(f.fps)}fps` : null,
     formatBytes(f.filesize || f.filesize_approx),
-    hasAv ? '有声' : f.vcodec && !f.acodec ? '无声' : null,
   ].filter(Boolean)
   return bits.join(' · ')
 }

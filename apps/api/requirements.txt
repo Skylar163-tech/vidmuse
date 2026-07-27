@@ -4,3 +4,4 @@ yt-dlp
 pydantic>=2,<3
 openai>=1.40,<2
 python-dotenv>=1.0,<2
+requests>=2.31,<3
