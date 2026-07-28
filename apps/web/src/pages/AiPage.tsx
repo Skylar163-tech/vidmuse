@@ -39,6 +39,9 @@ export function AiPage() {
   const [progress, setProgress] = useState(0)
   const [jobStatus, setJobStatus] = useState('')
   const [activeUrl, setActiveUrl] = useState('')
+  /** One panel at a time so summary + 80 subtitle lines don't stack forever. */
+  const [resultTab, setResultTab] = useState<'summary' | 'translate'>('summary')
+  const [chaptersOpen, setChaptersOpen] = useState(false)
 
   function refreshQuota() {
     api
@@ -115,6 +118,8 @@ export function AiPage() {
     setCopied('')
     setError('')
     setQuotaExceeded(false)
+    setResultTab('summary')
+    setChaptersOpen(false)
   }
 
   async function onParseAndStart(e: FormEvent) {
@@ -195,6 +200,7 @@ export function AiPage() {
     try {
       const data = await api.translate({ url: trimmed, title: title || undefined, language_to: 'zh' })
       setSubs(data)
+      setResultTab('translate')
       if (data.title && !title) setTitle(data.title)
       refreshQuota()
     } catch (e) {
@@ -330,178 +336,246 @@ export function AiPage() {
         )}
       </form>
 
-      <div className="mt-6 grid gap-5">
-        <section className="relative overflow-hidden rounded-2xl border border-line bg-surface p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">视频总结</h2>
-            <span className="rounded-full border border-accent/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent">
-              AI
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => runSummary()}
-              disabled={!workingUrl || summaryLoading}
-              className="h-10 rounded-xl bg-accent px-4 text-sm font-semibold text-white transition hover:bg-accent-hover disabled:opacity-60"
-            >
-              {summaryLoading ? '生成中…' : summary ? '重新生成' : '生成学习笔记'}
-            </button>
-            {summary && (
+      <div className="mt-6 rounded-2xl border border-line bg-surface p-5">
+        <div
+          className="mb-4 flex gap-1 rounded-xl border border-line bg-surface-2 p-1"
+          role="tablist"
+          aria-label="结果视图"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={resultTab === 'summary'}
+            onClick={() => setResultTab('summary')}
+            className={`h-9 flex-1 rounded-lg text-sm font-medium transition ${
+              resultTab === 'summary'
+                ? 'bg-surface text-white shadow-sm'
+                : 'text-muted hover:text-white'
+            }`}
+          >
+            视频总结
+            {summaryLoading ? '…' : ''}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={resultTab === 'translate'}
+            onClick={() => setResultTab('translate')}
+            className={`h-9 flex-1 rounded-lg text-sm font-medium transition ${
+              resultTab === 'translate'
+                ? 'bg-surface text-white shadow-sm'
+                : 'text-muted hover:text-white'
+            }`}
+          >
+            字幕翻译
+            {subs ? ` · ${subs.lines.length}` : translateLoading ? '…' : ''}
+          </button>
+        </div>
+
+        {resultTab === 'summary' && (
+          <section role="tabpanel">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs text-muted">要点与章节；翻译请切到另一页签。</p>
+              <span className="rounded-full border border-accent/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent">
+                AI
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={onCopySummary}
-                className="h-10 rounded-xl border border-line px-4 text-sm font-medium transition hover:border-accent/50"
+                onClick={() => runSummary()}
+                disabled={!workingUrl || summaryLoading}
+                className="h-10 rounded-xl bg-accent px-4 text-sm font-semibold text-white transition hover:bg-accent-hover disabled:opacity-60"
               >
-                {copied === 'summary' ? '已复制' : '复制 Markdown'}
+                {summaryLoading ? '生成中…' : summary ? '重新生成' : '生成学习笔记'}
               </button>
-            )}
-            <button
-              type="button"
-              onClick={onDownloadHere}
-              disabled={!workingUrl || !!jobId}
-              className="h-10 rounded-xl border border-line px-4 text-sm font-medium transition hover:border-accent/50 disabled:opacity-60"
-            >
-              {jobId ? `下载中 ${Math.round(progress)}%` : '下载本片'}
-            </button>
-          </div>
-
-          {preferredFormats.length > 0 && (
-            <div className="mt-3">
-              <label className="mb-1 block text-xs uppercase tracking-wider text-muted">
-                下载清晰度
-              </label>
-              <select
-                value={selectedFormatId}
-                onChange={(e) => {
-                  setSelectedFormatId(e.target.value)
-                  saveSession({
-                    url: workingUrl,
-                    title,
-                    formats,
-                    selectedFormatId: e.target.value,
-                  })
-                }}
-                className="h-10 w-full rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none focus:border-accent"
-              >
-                {preferredFormats.map((f) => (
-                  <option key={f.format_id} value={f.format_id}>
-                    {formatLabel(f)}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {jobId && (
-            <div className="mt-3">
-              <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
-                <div
-                  className="h-full rounded-full bg-accent transition-all duration-300"
-                  style={{ width: `${Math.max(4, progress)}%` }}
-                />
-              </div>
-              <p className="mt-2 text-xs text-muted">状态：{jobStatus || 'running'}</p>
-            </div>
-          )}
-
-          {summaryLoading && !summary && (
-            <p className="mt-4 text-sm text-muted">正在拉取字幕并生成笔记…</p>
-          )}
-
-          {summary && (
-            <div className="mt-4 space-y-4 text-sm">
-              <div>
-                <p className="text-xs text-muted">
-                  {summary.title}
-                  {summary.subtitle_lang ? ` · 字幕 ${summary.subtitle_lang}` : ''}
-                  {summary.truncated ? ' · 内容已截断' : ''}
-                </p>
-                <p className="mt-2 text-muted">{summary.summary}</p>
-              </div>
-              {summary.bullets.length > 0 && (
-                <ul className="space-y-2">
-                  {summary.bullets.map((b) => (
-                    <li key={b} className="flex gap-2">
-                      <span className="text-accent">•</span>
-                      <span>{b}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {summary.chapters.length > 0 && (
-                <div className="space-y-3 border-t border-line pt-4">
-                  <p className="text-xs uppercase tracking-wider text-muted">章节</p>
-                  {summary.chapters.map((ch) => (
-                    <div
-                      key={`${ch.start}-${ch.title}`}
-                      className="rounded-xl border border-line bg-surface-2 px-3 py-2"
-                    >
-                      <p className="font-medium">
-                        <span className="text-accent">{ch.start}</span> {ch.title}
-                      </p>
-                      {ch.points.length > 0 && (
-                        <ul className="mt-1 space-y-1 text-muted">
-                          {ch.points.map((p) => (
-                            <li key={p}>– {p}</li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </section>
-
-        <section className="relative overflow-hidden rounded-2xl border border-line bg-surface p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">字幕翻译</h2>
-            <span className="rounded-full border border-accent/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent">
-              AI
-            </span>
-          </div>
-          <p className="mb-3 text-xs text-muted">可与总结并行；不必等总结完成。</p>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={runTranslate}
-              disabled={!workingUrl || translateLoading}
-              className="h-10 rounded-xl bg-accent px-4 text-sm font-semibold text-white transition hover:bg-accent-hover disabled:opacity-60"
-            >
-              {translateLoading ? '翻译中…' : '翻译为中文'}
-            </button>
-            {subs && (
-              <button
-                type="button"
-                onClick={onCopyTranslate}
-                className="h-10 rounded-xl border border-line px-4 text-sm font-medium transition hover:border-accent/50"
-              >
-                {copied === 'translate' ? '已复制' : '复制 Markdown'}
-              </button>
-            )}
-          </div>
-          {subs && (
-            <div className="mt-4 space-y-3">
-              <p className="text-xs text-muted">
-                {subs.language_from} → {subs.language_to} · {subs.title}
-              </p>
-              {subs.lines.map((line) => (
-                <div
-                  key={`${line.start}-${line.original.slice(0, 12)}`}
-                  className="rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm"
+              {summary && (
+                <button
+                  type="button"
+                  onClick={onCopySummary}
+                  className="h-10 rounded-xl border border-line px-4 text-sm font-medium transition hover:border-accent/50"
                 >
-                  <p className="text-xs text-muted">
-                    {line.start} – {line.end}
-                  </p>
-                  <p className="mt-1 text-muted">{line.original}</p>
-                  <p className="mt-0.5">{line.translated}</p>
-                </div>
-              ))}
+                  {copied === 'summary' ? '已复制' : '复制 Markdown'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onDownloadHere}
+                disabled={!workingUrl || !!jobId}
+                className="h-10 rounded-xl border border-line px-4 text-sm font-medium transition hover:border-accent/50 disabled:opacity-60"
+              >
+                {jobId ? `下载中 ${Math.round(progress)}%` : '下载本片'}
+              </button>
             </div>
-          )}
-        </section>
+
+            {preferredFormats.length > 0 && (
+              <div className="mt-3">
+                <label className="mb-1 block text-xs uppercase tracking-wider text-muted">
+                  下载清晰度
+                </label>
+                <select
+                  value={selectedFormatId}
+                  onChange={(e) => {
+                    setSelectedFormatId(e.target.value)
+                    saveSession({
+                      url: workingUrl,
+                      title,
+                      formats,
+                      selectedFormatId: e.target.value,
+                    })
+                  }}
+                  className="h-10 w-full rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none focus:border-accent"
+                >
+                  {preferredFormats.map((f) => (
+                    <option key={f.format_id} value={f.format_id}>
+                      {formatLabel(f)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {jobId && (
+              <div className="mt-3">
+                <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
+                  <div
+                    className="h-full rounded-full bg-accent transition-all duration-300"
+                    style={{ width: `${Math.max(4, progress)}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-xs text-muted">状态：{jobStatus || 'running'}</p>
+              </div>
+            )}
+
+            {summaryLoading && !summary && (
+              <p className="mt-4 text-sm text-muted">正在拉取字幕并生成笔记…</p>
+            )}
+
+            {summary && (
+              <div className="mt-4 space-y-4 text-sm">
+                <div>
+                  <p className="text-xs text-muted">
+                    {summary.title}
+                    {summary.subtitle_lang ? ` · 字幕 ${summary.subtitle_lang}` : ''}
+                    {summary.truncated ? ' · 内容已截断' : ''}
+                  </p>
+                  <p className="mt-2 text-muted">{summary.summary}</p>
+                </div>
+                {summary.bullets.length > 0 && (
+                  <ul className="space-y-2">
+                    {summary.bullets.map((b) => (
+                      <li key={b} className="flex gap-2">
+                        <span className="text-accent">•</span>
+                        <span>{b}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {summary.chapters.length > 0 && (
+                  <div className="border-t border-line pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setChaptersOpen((v) => !v)}
+                      className="flex w-full items-center justify-between rounded-xl border border-line bg-surface-2 px-3 py-2 text-left text-sm transition hover:border-accent/40"
+                    >
+                      <span className="font-medium">
+                        章节
+                        <span className="ml-2 text-xs font-normal text-muted">
+                          {summary.chapters.length} 段
+                        </span>
+                      </span>
+                      <span className="text-xs text-muted">{chaptersOpen ? '收起' : '展开'}</span>
+                    </button>
+                    {chaptersOpen && (
+                      <div className="mt-2 max-h-[50vh] space-y-2 overflow-y-auto pr-1">
+                        {summary.chapters.map((ch) => (
+                          <div
+                            key={`${ch.start}-${ch.title}`}
+                            className="rounded-xl border border-line bg-surface-2 px-3 py-2"
+                          >
+                            <p className="font-medium">
+                              <span className="text-accent">{ch.start}</span> {ch.title}
+                            </p>
+                            {ch.points.length > 0 && (
+                              <ul className="mt-1 space-y-1 text-muted">
+                                {ch.points.map((p) => (
+                                  <li key={p}>– {p}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+
+        {resultTab === 'translate' && (
+          <section role="tabpanel">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs text-muted">可与总结并行；列表在区域内滚动，不拉长整页。</p>
+              <span className="rounded-full border border-accent/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent">
+                AI
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setResultTab('translate')
+                  void runTranslate()
+                }}
+                disabled={!workingUrl || translateLoading}
+                className="h-10 rounded-xl bg-accent px-4 text-sm font-semibold text-white transition hover:bg-accent-hover disabled:opacity-60"
+              >
+                {translateLoading ? '翻译中…' : '翻译为中文'}
+              </button>
+              {subs && (
+                <button
+                  type="button"
+                  onClick={onCopyTranslate}
+                  className="h-10 rounded-xl border border-line px-4 text-sm font-medium transition hover:border-accent/50"
+                >
+                  {copied === 'translate' ? '已复制' : '复制 Markdown'}
+                </button>
+              )}
+            </div>
+            {translateLoading && !subs && (
+              <p className="mt-4 text-sm text-muted">正在翻译字幕…</p>
+            )}
+            {subs && (
+              <div className="mt-4">
+                <p className="mb-2 text-xs text-muted">
+                  {subs.language_from} → {subs.language_to} · {subs.title}
+                </p>
+                <div className="max-h-[60vh] space-y-1.5 overflow-y-auto rounded-xl border border-line bg-surface-2/50 p-2">
+                  {subs.lines.map((line) => {
+                    const same =
+                      line.original.trim() === line.translated.trim()
+                    return (
+                      <div
+                        key={`${line.start}-${line.original.slice(0, 12)}`}
+                        className="rounded-lg border border-line/80 bg-surface px-2.5 py-1.5 text-sm"
+                      >
+                        <p className="text-[11px] text-muted">
+                          {line.start} – {line.end}
+                        </p>
+                        {!same && (
+                          <p className="mt-0.5 text-xs text-muted">{line.original}</p>
+                        )}
+                        <p className={same ? 'mt-0.5' : 'mt-0.5'}>{line.translated}</p>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
       </div>
     </div>
   )

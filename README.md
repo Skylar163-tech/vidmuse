@@ -100,6 +100,6 @@ npm run dev
 - `/ai`：可本页换链接「解析并开始」；总结与翻译互不阻塞；可同页下载；免费每日 3 次 AI
 - `/pro`：付费门面（占位）；讲清免费额度 vs Pro
 
-无外挂字幕轨时笔记会明确失败（本轮不做 Whisper）。B 站字幕建议配置 cookies；有声下载依赖 ffmpeg。
+无外挂字幕轨时笔记会明确失败（本轮不做 Whisper）。可用带 CC/自动字幕的 **YouTube** 链接验证学习笔记（无需登录）；B 站 CC/AI 字幕常需登录态，开发者可本机配置 cookies，产品不要求终端用户填写。有声下载依赖 ffmpeg。
 
 完整能力与卡点见 [PROJECT_STATUS.md](PROJECT_STATUS.md)。
