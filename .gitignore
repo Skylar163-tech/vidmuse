@@ -23,3 +23,7 @@ dist/
 # yt-dlp cookies (may contain session secrets)
 apps/api/cookies.txt
 cookies.txt
+
+# Local ffmpeg binaries (do not commit)
+apps/api/bin/ffmpeg.exe
+apps/api/bin/ffprobe.exe
